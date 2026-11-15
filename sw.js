@@ -1,16 +1,23 @@
-const VERSION = "noctis-v1";
+const VERSION = "noctis-v3";
 const SHELL = [
   "./", "./index.html", "./manifest.webmanifest", "./css/app.css",
   "./js/app.js", "./js/util.js", "./js/data.js", "./js/store.js", "./js/icons.js", "./js/ui.js",
-  "./js/dictionary.js", "./js/detector.js", "./js/convert.js", "./js/finance.js", "./js/cryptocalc.js",
-  "./js/backup.js", "./js/notify.js",
-  "./js/screens/tasks.js", "./js/screens/namaz.js", "./js/screens/finance.js",
-  "./js/screens/binance.js", "./js/screens/gym.js", "./js/screens/settings.js",
-  "./icons/icon-192.png", "./icons/icon-512.png", "./icons/apple-touch-icon.png", "./icons/favicon.png",
+  "./js/security.js", "./js/detector.js", "./js/convert.js", "./js/finance.js", "./js/backup.js",
+  "./js/screens/namaz.js", "./js/screens/gym.js", "./js/screens/finance.js", "./js/screens/settings.js",
+  "./icons/icon-192.png", "./icons/icon-512.png", "./icons/icon-maskable-512.png",
+  "./icons/apple-touch-icon.png", "./icons/favicon.png",
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // Ek file missing ho to poora install fail na ho (addAll sab ya kuch nahi karta)
+  e.waitUntil(
+    caches.open(VERSION)
+      .then((c) => Promise.allSettled(SHELL.map((u) => c.add(u))))
+      .then((res) => {
+        res.forEach((r, i) => { if (r.status === "rejected") console.warn("SW: cache nahi hui:", SHELL[i]); });
+        return self.skipWaiting();
+      })
+  );
 });
 
 self.addEventListener("activate", (e) => {
@@ -30,7 +37,10 @@ self.addEventListener("fetch", (e) => {
     e.respondWith(
       caches.open("noctis-fonts").then(async (c) => {
         const hit = await c.match(req);
-        const net = fetch(req).then((r) => { if (r.ok || r.type === "opaque") c.put(req, r.clone()); return r; }).catch(() => hit);
+        const net = fetch(req).then((r) => {
+          if (r.status === 200 || r.type === "opaque") c.put(req, r.clone()).catch(() => {});
+          return r;
+        }).catch(() => hit || Response.error());
         return hit || net;
       })
     );
@@ -42,9 +52,13 @@ self.addEventListener("fetch", (e) => {
   e.respondWith(
     caches.match(req, { ignoreSearch: true }).then((hit) => {
       const net = fetch(req).then((r) => {
-        if (r.ok) caches.open(VERSION).then((c) => c.put(req, r.clone()));
+        // clone foran (synchronously) karna zaroori hai, warna "body already used" error aata hai
+        if (r.status === 200) {
+          const copy = r.clone();
+          e.waitUntil(caches.open(VERSION).then((c) => c.put(req, copy)).catch(() => {}));
+        }
         return r;
-      }).catch(() => hit || caches.match("./index.html"));
+      }).catch(() => hit || (req.mode === "navigate" ? caches.match("./index.html") : Response.error()));
       return hit || net;
     })
   );

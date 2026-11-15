@@ -2,6 +2,8 @@
   "name": "NOCTIS",
   "short_name": "NOCTIS",
   "description": "Private all-in-one life manager: tasks, namaz, finance, Binance and gym. Works offline.",
+  "id": "./",
+  "lang": "en",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

@@ -1,117 +1,65 @@
-import { EXERCISE_DICT } from "./dictionary.js";
-const SYN = {
-    db: "dumbbell", dumbell: "dumbbell", bb: "barbell",
-    pullup: "pull up", pushup: "push up", situp: "sit up", chinup: "chin up",
-    pulldown: "pull down", pushdown: "push down", pressdown: "push down",
-    skullcrusher: "skull crusher", flye: "fly", ohp: "overhead press",
-    rdl: "romanian deadlift", tbar: "t bar", ezbar: "ez bar", cgbp: "close grip bench press",
-    bicep: "biceps", tricep: "triceps",
+// Automatic muscle-group detection from an exercise name.
+// Rules run top to bottom; the first match wins, so specific rules come before general ones.
+
+export const MUSCLES = {
+  lats: { label: "Lats", group: "back" },
+  mid_back: { label: "Mid-Back", group: "back" },
+  traps: { label: "Traps", group: "back" },
+  lower_back: { label: "Lower Back", group: "back" },
+  rear_delts: { label: "Rear Delts", group: "shoulders" },
+  shoulders: { label: "Shoulders", group: "shoulders" },
+  chest: { label: "Chest", group: "chest" },
+  biceps: { label: "Biceps", group: "arms" },
+  triceps: { label: "Triceps", group: "arms" },
+  forearms: { label: "Forearms", group: "arms" },
+  quads: { label: "Quads", group: "legs" },
+  hamstrings: { label: "Hamstrings", group: "legs" },
+  glutes: { label: "Glutes", group: "legs" },
+  calves: { label: "Calves", group: "legs" },
+  abs: { label: "Abs", group: "core" },
 };
-const STOP = new Set(["the", "a", "an", "with", "on", "using", "of", "and"]);
-const singular = (t) => t.length > 3 && t.endsWith("s") && !t.endsWith("ss") ? t.slice(0, -1) : t;
-function tokens(s) {
-    return s
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, " ")
-        .trim()
-        .split(" ")
-        .filter((t) => t && !STOP.has(t))
-        .map(singular)
-        .flatMap((t) => (SYN[t] ?? t).split(" "))
-        .map((t) => (t === "biceps" || t === "triceps" ? t : singular(t)));
-}
-let INDEX = null;
-const build = () => {
-    if (INDEX)
-        return INDEX;
-    INDEX = [];
-    for (const entry of EXERCISE_DICT)
-        for (const n of [entry.name, ...entry.aliases]) {
-            const t = tokens(n);
-            INDEX.push({ entry, set: new Set(t), key: [...t].sort().join(" "), seq: t });
-        }
-    return INDEX;
-};
-// Generic fallbacks, first match wins (specific rules before general ones).
-const RULES = [
-    [/incline.*(press|fly)/, "Chest", "Upper Chest (Clavicular Head)"],
-    [/decline.*(press|fly)/, "Chest", "Lower Chest (Sternal Head)"],
-    [/chest dip/, "Chest", "Lower Chest & Triceps"],
-    [/(bench|chest) press|push up|pec|fly|crossover/, "Chest", "Mid Chest (Sternal Pec Major)"],
-    [/hammer.*curl/, "Biceps", "Brachialis & Long Head of Biceps"],
-    [/preacher|spider/, "Biceps", "Biceps Short Head"],
-    [/incline.*curl/, "Biceps", "Biceps Long Head (Stretch)"],
-    [/leg curl|hamstring curl/, "Legs", "Hamstrings (Biceps Femoris)"],
-    [/wrist|forearm/, "Biceps", "Forearm Flexors & Extensors"],
-    [/curl/, "Biceps", "Biceps Brachii (Long & Short Head)"],
-    [/skull|push down|kickback|triceps|french press|close grip bench|jm press/, "Triceps", "Triceps (Long, Lateral & Medial Head)"],
-    [/dip/, "Triceps", "Triceps (All Heads)"],
-    [/pull down|pull up|chin up|lat /, "Back", "Lats & Upper Back"],
-    [/romanian|stiff leg|good morning/, "Legs", "Hamstrings & Glutes"],
-    [/deadlift/, "Back", "Erector Spinae, Glutes & Hamstrings"],
-    [/shrug/, "Back", "Upper Trapezius"],
-    [/face pull|rear delt|reverse fly/, "Shoulders", "Rear Delt (Posterior Head)"],
-    [/row/, "Back", "Mid-Back & Rhomboids"],
-    [/lateral raise|side raise/, "Shoulders", "Side Delt (Medial Head)"],
-    [/front raise/, "Shoulders", "Front Delt (Anterior Head)"],
-    [/shoulder press|overhead press|military|arnold|upright/, "Shoulders", "Front & Side Delts"],
-    [/calf/, "Legs", "Calves (Gastrocnemius & Soleus)"],
-    [/hip thrust|glute|bridge/, "Legs", "Glutes (Gluteus Maximus)"],
-    [/leg extension/, "Legs", "Quadriceps"],
-    [/squat|leg press|lunge|step up|hack/, "Legs", "Quads, Glutes & Hamstrings"],
-    [/adduct/, "Legs", "Inner Thigh (Adductors)"],
-    [/abduct/, "Legs", "Glute Medius & Outer Thigh"],
-    [/twist|woodchop|oblique|side plank/, "Abs", "Obliques"],
-    [/leg raise|knee raise|reverse crunch/, "Abs", "Lower Abs & Hip Flexors"],
-    [/crunch|sit up|plank|ab |abs|core|rollout/, "Abs", "Rectus Abdominis & Core"],
+
+const norm = (s) =>
+  String(s || "")
+    .toLowerCase()
+    .replace(/[-_/.,]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const rules = [
+  (n) => /hyper ?extension|back extension|reverse hyper|good ?morning|superman/.test(n) && { p: ["lower_back"], s: ["glutes", "hamstrings"] },
+  (n) => /romanian|\brdl\b|stiff leg/.test(n) && { p: ["hamstrings"], s: ["glutes", "lower_back"] },
+  (n) => /deadlift|rack pull/.test(n) && { p: ["lower_back", "hamstrings"], s: ["glutes", "traps", "lats"] },
+  (n) => /hip thrust|glute|donkey/.test(n) && { p: ["glutes"], s: ["hamstrings"] },
+  (n) => /face pull|reverse (fly|flye|pec)|rear delt|rear lateral/.test(n) && { p: ["rear_delts"], s: ["mid_back", "traps"] },
+  (n) => /upright row/.test(n) && { p: ["shoulders", "traps"], s: ["biceps"] },
+  (n) => /shrug/.test(n) && { p: ["traps"], s: ["forearms"] },
+  (n) =>
+    /pull ?down|lat pull|pull ?up|chin ?up/.test(n) &&
+    (/close|reverse|under|chin/.test(n) ? { p: ["lats", "biceps"], s: ["mid_back", "forearms"] } : { p: ["lats"], s: ["biceps", "mid_back"] }),
+  (n) => /pullover|straight arm/.test(n) && { p: ["lats"], s: ["chest", "triceps"] },
+  // rows: one-arm / dumbbell, then wide grip, then barbell, then everything else
+  (n) => /\brow\b/.test(n) && /(one|single) ?(hand|arm)|unilateral|\bdb\b|dumbbell/.test(n) && { p: ["lats"], s: ["mid_back", "biceps", "rear_delts"] },
+  (n) => /\brow\b/.test(n) && /wide/.test(n) && { p: ["mid_back"], s: ["lats", "rear_delts", "biceps"] },
+  (n) => /\brow\b/.test(n) && /t ?bar|barbell|bent ?over|pendlay|yates|seal/.test(n) && { p: ["lats", "mid_back"], s: ["lower_back", "biceps", "rear_delts"] },
+  (n) => /\brow\b/.test(n) && { p: ["mid_back", "lats"], s: ["biceps", "rear_delts"] },
+  (n) => /tricep|skull ?crusher|push ?down|jm press|close grip (bench|push)|french press|overhead extension|kickback/.test(n) && { p: ["triceps"], s: ["shoulders"] },
+  (n) => /\bdips?\b/.test(n) && (/bench/.test(n) ? { p: ["triceps"], s: ["shoulders", "chest"] } : { p: ["chest", "triceps"], s: ["shoulders"] }),
+  (n) => /bench|chest press|push ?up|pec ?deck|\bfly\b|flye|crossover/.test(n) && { p: ["chest"], s: ["triceps", "shoulders"] },
+  (n) => /overhead press|shoulder press|military|arnold|lateral raise|side raise|front raise|\bohp\b|push press|landmine/.test(n) && { p: ["shoulders"], s: ["triceps"] },
+  (n) => /leg curl|hamstring curl|nordic/.test(n) && { p: ["hamstrings"], s: ["calves"] },
+  (n) => /wrist curl|farmer|grip/.test(n) && { p: ["forearms"], s: [] },
+  (n) => /curl|bicep|preacher|hammer|concentration|spider/.test(n) && { p: ["biceps"], s: ["forearms"] },
+  (n) => /calf|calves/.test(n) && { p: ["calves"], s: [] },
+  (n) => /squat|leg press|hack|lunge|step ?up|leg extension|sissy/.test(n) && { p: ["quads"], s: ["glutes", "hamstrings"] },
+  (n) => /crunch|plank|sit ?up|leg raise|knee raise|ab wheel|rollout|russian twist|wood ?chop|\babs?\b|\bcore\b|v up/.test(n) && { p: ["abs"], s: [] },
 ];
-export function detectMuscle(input) {
-    const raw = input.trim();
-    if (raw.length < 3)
-        return null;
-    const t = tokens(raw);
-    if (!t.length)
-        return null;
-    const index = build();
-    // 1) exact (word order ignored, plural/alias aware)
-    const key = [...t].sort().join(" ");
-    // Word order is ignored, but if several entries share the same words
-    // ("Low-to-High" vs "High-to-Low" Cable Fly) the one with matching word order wins.
-    const bigrams = (a) => a.slice(1).map((x, i) => `${a[i]}>${x}`);
-    const qb = new Set(bigrams(t));
-    let hit;
-    let hitScore = -1;
-    for (const i of index) {
-        if (i.key !== key)
-            continue;
-        const sc = bigrams(i.seq).filter((b) => qb.has(b)).length;
-        if (sc > hitScore) {
-            hit = i;
-            hitScore = sc;
-        }
-    }
-    if (hit)
-        return { group: hit.entry.group, target: hit.entry.target, name: hit.entry.name, match: "exact" };
-    // 2) similar (token overlap)
-    const q = new Set(t);
-    let best = null;
-    let bestScore = 0;
-    for (const i of index) {
-        let inter = 0;
-        q.forEach((x) => i.set.has(x) && inter++);
-        const score = inter / (q.size + i.set.size - inter);
-        if (score > bestScore) {
-            bestScore = score;
-            best = i;
-        }
-    }
-    if (best && bestScore >= 0.6)
-        return { group: best.entry.group, target: best.entry.target, name: best.entry.name, match: "similar" };
-    // 3) keyword rules
-    const text = t.join(" ");
-    for (const [re, group, target] of RULES)
-        if (re.test(text))
-            return { group, target, match: "keyword" };
-    return null;
+
+export function detectMuscles(name) {
+  const n = norm(name);
+  for (const r of rules) {
+    const m = r(n);
+    if (m) return { primary: m.p, secondary: m.s, matched: true };
+  }
+  return { primary: [], secondary: [], matched: false };
 }
-export const titleCase = (s) => s.trim().replace(/\s+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());

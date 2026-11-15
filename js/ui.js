@@ -1,95 +1,63 @@
-import { $, esc, vibrate } from "./util.js";
-import { icons } from "./icons.js";
+// Toasts, bottom sheets and a confirm dialog. `view` lets screens ask the app shell to redraw.
+import { $, esc } from "./util.js";
 
-const layer = () => $("#layer");
+export const view = { refresh() {}, lock() {} };
 
+let toastTimer = 0;
 export function toast(msg, ms = 2400) {
   const t = $("#toast");
+  if (!t) return;
   t.textContent = msg;
   t.classList.add("show");
-  clearTimeout(toast._t);
-  toast._t = setTimeout(() => t.classList.remove("show"), ms);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), ms);
 }
 
-/** Bottom sheet. Returns { el, close }. onClose runs once when dismissed. */
-export function sheet(title, html, { onClose } = {}) {
-  const ov = document.createElement("div");
-  ov.className = "ov";
-  ov.innerHTML = `<div class="sheet"><h3><span>${esc(title)}</span><button class="icbtn" data-close aria-label="Close" style="font-size:22px">✕</button></h3><div data-body>${html}</div></div>`;
-  let closed = false;
-  const close = () => { if (closed) return; closed = true; ov.remove(); onClose && onClose(); };
-  ov.addEventListener("click", (e) => { if (e.target === ov || e.target.closest("[data-close]")) close(); });
-  layer().appendChild(ov);
-  return { el: ov.querySelector("[data-body]"), root: ov, close };
+let current = null;
+
+export function openSheet(html, { onClose } = {}) {
+  closeSheet();
+  const layer = $("#layer");
+  layer.innerHTML = `<div class="backdrop" data-close></div><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div><div class="sheet-body">${html}</div></div>`;
+  layer.classList.add("open");
+  const el = layer.querySelector(".sheet-body");
+  const api = {
+    el,
+    close() {
+      if (current !== api) return;
+      current = null;
+      layer.classList.remove("open");
+      layer.innerHTML = "";
+      if (onClose) onClose();
+    },
+  };
+  layer.querySelector("[data-close]").addEventListener("click", api.close);
+  current = api;
+  return api;
 }
 
-function dialog(html) {
+export function closeSheet() {
+  if (current) current.close();
+}
+
+export function confirmBox({ title, body = "", ok = "Confirm", cancel = "Cancel", danger = false }) {
   return new Promise((resolve) => {
-    const ov = document.createElement("div");
-    ov.className = "ov mid";
-    ov.innerHTML = `<div class="dlg">${html}</div>`;
-    const done = (v) => { ov.remove(); resolve(v); };
-    ov.addEventListener("click", (e) => {
-      const b = e.target.closest("[data-r]");
-      if (b) done(b.dataset.r === "1");
-      else if (e.target === ov) done(false);
+    let res = false;
+    const sh = openSheet(
+      `<h3 class="sheet-title">${esc(title)}</h3><p class="sheet-text">${esc(body)}</p>
+       <div class="btn-row"><button class="btn ghost" data-no>${esc(cancel)}</button><button class="btn ${danger ? "danger" : "primary"}" data-yes>${esc(ok)}</button></div>`,
+      { onClose: () => resolve(res) }
+    );
+    sh.el.querySelector("[data-yes]").addEventListener("click", () => {
+      res = true;
+      sh.close();
     });
-    layer().appendChild(ov);
+    sh.el.querySelector("[data-no]").addEventListener("click", () => sh.close());
   });
 }
-export const confirmBox = (title, msg, { ok = "OK", danger = false, cancel = "Cancel" } = {}) =>
-  dialog(`<div class="bold" style="font-size:18px">${esc(title)}</div><p class="muted sm" style="white-space:pre-line">${esc(msg)}</p>
-  <div class="row gap8 mt16"><button class="btn grow" data-r="0">${esc(cancel)}</button><button class="btn grow ${danger ? "danger" : "primary"}" data-r="1">${esc(ok)}</button></div>`);
-export const alertBox = (title, msg) =>
-  dialog(`<div class="bold" style="font-size:18px">${esc(title)}</div><p class="muted sm" style="white-space:pre-line">${esc(msg)}</p>
-  <div class="mt16"><button class="btn primary block" data-r="1">OK</button></div>`);
 
-/* ---------- reusable HTML snippets ---------- */
-export const header = (iconHtml, title, urdu, sub) =>
-  `<div class="hdr"><div class="ico">${iconHtml}</div><div class="grow"><div class="row"><span class="h1">${esc(title)}</span>${urdu ? `<span class="ur">${urdu}</span>` : ""}</div>${sub ? `<div class="muted sm">${esc(sub)}</div>` : ""}</div></div>`;
-
-export const bar = (v, color = "var(--emerald)") =>
-  `<div class="bar"><i style="width:${Math.max(0, Math.min(100, v * 100))}%;background:${color}"></i></div>`;
-
-/** glowing Done button */
-export const gbtn = (act, id, { color = "var(--cyan)", done = false, label = "Done", doneLabel = "Done ✓", compact = false } = {}) =>
-  `<span class="gwrap"><button class="gbtn ${compact ? "compact" : ""} ${done ? "done" : ""}" style="--c:${color}" data-act="${act}" data-id="${esc(id)}">${done ? doneLabel : "✓ " + esc(label)}</button></span>`;
-
-export const chip = (label, act, id, on, tone = "") =>
-  `<button class="chip ${on ? "on" : ""} ${tone}" data-act="${act}" data-id="${esc(id)}">${esc(label)}</button>`;
-
-export const field = (label, id, { type = "text", ph = "", value = "", inputmode = "" } = {}) =>
-  `<div class="field"><label class="lbl" for="${id}">${esc(label)}</label><input class="inp" id="${id}" type="${type}" placeholder="${esc(ph)}" value="${esc(value)}" ${inputmode ? `inputmode="${inputmode}"` : ""} autocomplete="off"></div>`;
-
-export const sectionTitle = (t, right = "") => `<div class="sec row between"><span>${t}</span>${right}</div>`;
-
-/** PIN pad. Calls onSubmit(pin) -> Promise<boolean>; false = shake and clear. */
-export function pinPad(root, { title, subtitle = "", onSubmit, disabled = () => false }) {
-  let pin = "";
-  root.innerHTML = `<div style="text-align:center;width:100%"><div class="bold" style="font-size:24px">${esc(title)}</div>
-  <div class="muted sm" style="height:20px;margin-top:8px" data-sub>${esc(subtitle)}</div>
-  <div class="dots" data-dots style="justify-content:center"><i></i><i></i><i></i><i></i></div>
-  <div class="pad" style="justify-content:center">${["1","2","3","4","5","6","7","8","9","","0","⌫"].map((k) => k === "" ? '<button class="ghost" disabled></button>' : `<button data-k="${k}">${k}</button>`).join("")}</div></div>`;
-  const dots = () => root.querySelectorAll("[data-dots] i").forEach((d, i) => d.classList.toggle("f", i < pin.length));
-  root.addEventListener("click", async (e) => {
-    const b = e.target.closest("[data-k]");
-    if (!b || disabled()) return;
-    vibrate(10);
-    const k = b.dataset.k;
-    if (k === "⌫") { pin = pin.slice(0, -1); return dots(); }
-    if (pin.length >= 4) return;
-    pin += k; dots();
-    if (pin.length === 4) {
-      await new Promise((r) => setTimeout(r, 120));
-      const ok = await onSubmit(pin);
-      if (!ok) {
-        vibrate([60, 40, 60]);
-        const d = root.querySelector("[data-dots]");
-        d.classList.remove("shake"); void d.offsetWidth; d.classList.add("shake");
-      }
-      pin = ""; dots();
-    }
+if (typeof document !== "undefined") {
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeSheet();
   });
-  return { setSubtitle: (t) => (root.querySelector("[data-sub]").textContent = t) };
 }
-export { icons };
